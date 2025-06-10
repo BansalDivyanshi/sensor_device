@@ -7,6 +7,7 @@ import pandas as pd
 from models import SensorReading, SensorSTSI 
 from models import Sensor 
 from pydantic import BaseModel
+from typing import List
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -155,4 +156,43 @@ def get_stsi_trend(id: int, start: str, end: str):
             "description": "Daily average Sensor Trend Stability Index (STSI) from rolling std dev of hourly values. Higher = more stable."
         }
     }
+
+
+@app.post("/sensors/{id}/metrics", response_model=schemas.HealthMetricOut)
+def add_health_metric(id: int, metric: schemas.HealthMetricCreate, db: Session = Depends(get_db)):
+    sensor = db.get(models.Sensor, id)
+    if not sensor:
+        raise HTTPException(404, "Sensor not found")
+    hm = models.SensorHealthMetric(sensor_id=id, **metric.dict())
+    db.add(hm)
+    db.commit()
+    db.refresh(hm)
+    return hm
+
+@app.get("/sensors/{id}/metrics", response_model=List[schemas.HealthMetricOut])
+def list_health_metrics(id: int, db: Session = Depends(get_db)):
+    return db.query(models.SensorHealthMetric).filter_by(sensor_id=id).all()
+
+@app.put("/metrics/{mid}", response_model=schemas.HealthMetricOut)
+def update_health_metric(mid: int, updates: schemas.HealthMetricCreate, db: Session = Depends(get_db)):
+    hm = db.get(models.SensorHealthMetric, mid)
+    if not hm:
+        raise HTTPException(404, "Metric not found")
+    for k, v in updates.dict(exclude_unset=True).items():
+        setattr(hm, k, v)
+    db.commit()
+    db.refresh(hm)
+    return hm
+
+@app.delete("/metrics/{mid}")
+def delete_health_metric(mid: int, db: Session = Depends(get_db)):
+    hm = db.get(models.SensorHealthMetric, mid)
+    if not hm:
+        raise HTTPException(404, "Metric not found")
+    db.delete(hm)
+    db.commit()
+    return {"detail": "Deleted"}
+
+
+
 

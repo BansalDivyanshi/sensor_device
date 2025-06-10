@@ -46,3 +46,15 @@ class QualityReportResponse(BaseModel):
     expected_interval_minutes: int
     missing_percentage: float
     out_of_range_percentage: float
+
+class HealthMetricCreate(BaseModel):
+    uptime_percentage: Optional[float]
+    mtbf: Optional[float]
+    last_anomaly_detected: Optional[datetime]
+
+class HealthMetricOut(HealthMetricCreate):
+    id: int
+    sensor_id: int
+
+    class Config:
+        orm_mode = True
