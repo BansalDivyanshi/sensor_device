@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, Float, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from database import Base
+from sqlalchemy import Column, Integer, Float, Date, PrimaryKeyConstraint
+from sqlalchemy.ext.declarative import declarative_base
 
 class Sensor(Base):
     __tablename__ = "sensors"
@@ -18,3 +20,14 @@ class SensorReading(Base):
     unit = Column(String, nullable=False)
 
     sensor = relationship("Sensor", back_populates="readings")
+
+Base = declarative_base()
+
+class SensorSTSI(Base):
+    __tablename__ = "sensor_stsi"
+    sensor_id = Column(Integer, nullable=False)
+    date = Column(Date, nullable=False)
+    stsi = Column(Float, nullable=False)
+
+    __table_args__ = (PrimaryKeyConstraint('sensor_id', 'date'),)
+

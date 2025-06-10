@@ -71,3 +71,4 @@ def get_quality_report(db: Session, sensor_id: int):
     values = [r.value for r in readings]
 
     return calculate_quality(timestamps, values)
+    

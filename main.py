@@ -2,8 +2,14 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine
 import models, crud, schemas
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+from models import SensorReading, SensorSTSI 
+from models import Sensor 
+from pydantic import BaseModel
 
 models.Base.metadata.create_all(bind=engine)
+
 
 app = FastAPI()
 
@@ -13,6 +19,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+class SensorCreate(BaseModel):
+    name: str
+
+@app.post("/sensors/")
+def create_sensor(sensor: SensorCreate, db: Session = Depends(get_db)):
+    new_sensor = Sensor(name=sensor.name)
+    db.add(new_sensor)
+    db.commit()
+    db.refresh(new_sensor)
+    return {
+        "sensor_id": new_sensor.id,
+        "name": new_sensor.name,
+        "message": "Sensor created successfully"
+    }
+
 
 @app.post("/sensors/{sensor_id}/data")
 def add_sensor_data(sensor_id: int, readings: list[schemas.ReadingCreate], db: Session = Depends(get_db)):
@@ -73,3 +96,63 @@ def quality_report(sensor_id: int, db: Session = Depends(get_db)):
         "missing_percentage": missing,
         "out_of_range_percentage": out_of_range
     }
+
+@app.get("/sensor/{id}/stsi")
+def get_stsi_trend(id: int, start: str, end: str):
+    session = SessionLocal()
+    try:
+        start_date = datetime.strptime(start, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format.")
+    
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    readings = session.query(SensorReading).filter(
+        SensorReading.sensor_id == id,
+        SensorReading.timestamp >= cutoff
+    ).order_by(SensorReading.timestamp).all()
+
+    if not readings:
+        raise HTTPException(status_code=404, detail="No readings found")
+
+    df = pd.DataFrame([(r.timestamp, r.value) for r in readings], columns=["timestamp", "value"])
+    df.set_index("timestamp", inplace=True)
+    
+    hourly = df.resample("1h").mean().interpolate()
+
+    rolling_std = hourly.rolling("3h").std().fillna(0)
+    normalized_std = (rolling_std - rolling_std.min()) / (rolling_std.max() - rolling_std.min() + 1e-8)
+    stsi = 1 - normalized_std  
+
+
+    daily_stsi = stsi.resample("1D").mean()
+    daily_stsi["sensor_id"] = id
+    daily_stsi = daily_stsi.reset_index().rename(columns={"timestamp": "date", "value": "stsi"})
+
+
+    for i, row in daily_stsi.iterrows():
+        row_date = row["date"].date()
+        if start_date <= row_date <= end_date:
+            stsi_entry = SensorSTSI(sensor_id=row["sensor_id"], date=row_date, stsi=row["stsi"])
+            session.merge(stsi_entry)
+    session.commit()
+
+    result = [
+        {
+            "date": row["date"].strftime("%Y-%m-%d"),
+            "average_stsi": round(row["stsi"], 2)
+        }
+        for _, row in daily_stsi.iterrows()
+        if start_date <= row["date"].date() <= end_date
+    ]
+
+    return {
+        "sensor_id": id,
+        "stsi_trend": result,
+        "metadata": {
+            "window_size": "1 hour",
+            "description": "Daily average Sensor Trend Stability Index (STSI) from rolling std dev of hourly values. Higher = more stable."
+        }
+    }
+
