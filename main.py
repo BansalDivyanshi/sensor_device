@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine
+from database import SessionLocal, engine, get_db
 import models, crud, schemas
 from datetime import datetime, timedelta, timezone
 import pandas as pd
@@ -8,18 +8,13 @@ from models import SensorReading, SensorSTSI
 from models import Sensor 
 from pydantic import BaseModel
 from typing import List
+from crud import get_sensor_readings
+from crud import get_sensor_readings
+import numpy as np
+from scipy.stats import ttest_ind
 
 models.Base.metadata.create_all(bind=engine)
-
-
 app = FastAPI()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 class SensorCreate(BaseModel):
@@ -192,6 +187,46 @@ def delete_health_metric(mid: int, db: Session = Depends(get_db)):
     db.delete(hm)
     db.commit()
     return {"detail": "Deleted"}
+
+class DriftResult(BaseModel):
+    sensor_id: int
+    drift_detected: bool
+    recent_mean: float
+    previous_mean: float
+    t_statistic: float
+    p_value: float
+
+@app.get("/sensor/{sensor_id}/drift", response_model=DriftResult)
+def detect_drift(sensor_id: int, days: int = 6, window: int = 3, db: Session = Depends(get_db)):
+    end_date = datetime.utcnow().date()
+    start_date = end_date - timedelta(days=days)
+    recent_window_start = end_date - timedelta(days=window)
+    previous_window_start = start_date
+    previous_window_end = recent_window_start
+
+    recent_data = get_sensor_readings(sensor_id, recent_window_start, end_date, db)
+    previous_data = get_sensor_readings(sensor_id, previous_window_start, previous_window_end, db)
+
+    if not recent_data or not previous_data:
+        raise HTTPException(status_code=404, detail="Not enough data for statistical test.")
+
+    recent_arr = np.array(recent_data)
+    previous_arr = np.array(previous_data)
+
+    mean_recent = float(np.mean(recent_arr))
+    mean_previous = float(np.mean(previous_arr))
+
+    t_stat, p_value = ttest_ind(previous_arr, recent_arr, equal_var=False, nan_policy='omit')
+    drift = bool(p_value < 0.05)
+
+    return DriftResult(
+        sensor_id=sensor_id,
+        drift_detected=drift,
+        recent_mean=mean_recent,
+        previous_mean=mean_previous,
+        t_statistic=float(t_stat),
+        p_value=float(p_value)
+    )
 
 
 

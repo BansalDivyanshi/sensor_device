@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, String, ForeignKey, Date, DateTime, Enum, PrimaryKeyConstraint
+from sqlalchemy import Column, Integer, Float, String, ForeignKey, Date, DateTime, Enum, PrimaryKeyConstraint, func
 from sqlalchemy.orm import relationship
 from database import Base 
 import enum
@@ -46,5 +46,7 @@ class SensorHealthMetric(Base):
     uptime_percentage = Column(Float, nullable=True)
     mtbf = Column(Float, nullable=True)
     last_anomaly_detected = Column(DateTime, nullable=True)
+    
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     sensor = relationship("Sensor", back_populates="health_metrics")

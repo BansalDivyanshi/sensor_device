@@ -8,6 +8,9 @@ from utils import (
     calculate_quality
 )
 from datetime import datetime, timedelta
+from models import SensorReading
+from database import SessionLocal
+from typing import List
 
 def create_sensor_reading(db: Session, sensor_id: int, reading: ReadingCreate):
     db_reading = SensorReading(
@@ -71,4 +74,14 @@ def get_quality_report(db: Session, sensor_id: int):
     values = [r.value for r in readings]
 
     return calculate_quality(timestamps, values)
-    
+
+
+def get_sensor_readings(sensor_id: int, start_date, end_date, db: Session) -> List[float]:
+    readings = (
+        db.query(SensorReading.value)
+        .filter(SensorReading.sensor_id == sensor_id)
+        .filter(SensorReading.timestamp >= start_date)
+        .filter(SensorReading.timestamp < end_date)
+        .all()
+    )
+    return [float(r[0]) for r in readings] 
